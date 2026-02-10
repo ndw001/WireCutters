@@ -1,39 +1,36 @@
 import React from 'react'
-import { getTotalPlayed, TOTAL_CARDS } from '../game/logic'
+import { TOTAL_TILES, totalTilesLeft } from '../game/logic'
 
 export default function GameOver({ state, onRestart }) {
-  const { phase, playedCount, lives } = state
+  const { phase, players, lives } = state
   const isWin = phase === 'win'
-  const totalPlayed = getTotalPlayed(playedCount)
+  const remaining = totalTilesLeft(players)
+  const cut = TOTAL_TILES - remaining
 
   return (
     <div className={`screen gameover-screen ${isWin ? 'win' : 'lose'}`}>
       <div className="gameover-content">
         <div className="gameover-icon">{isWin ? '🎉' : '💥'}</div>
-        <h1 className="gameover-title">
-          {isWin ? 'BOMB DEFUSED!' : 'BOOM!'}
-        </h1>
+        <h1 className="gameover-title">{isWin ? 'BOMB DEFUSED!' : 'BOOM!'}</h1>
         <p className="gameover-sub">
           {isWin
-            ? 'Outstanding work, agents. The city is safe.'
+            ? 'Outstanding teamwork. The city is safe.'
             : 'The bomb detonated. Better luck next mission.'}
         </p>
-
         <div className="gameover-stats">
           <div className="stat">
-            <span className="stat-label">Cards Defused</span>
-            <span className="stat-value">{totalPlayed} / {TOTAL_CARDS}</span>
+            <span className="stat-label">Wires Cut</span>
+            <span className="stat-value">{cut} / {TOTAL_TILES}</span>
           </div>
           <div className="stat">
-            <span className="stat-label">Lives Remaining</span>
+            <span className="stat-label">Lives Left</span>
             <span className="stat-value">{lives} / 3</span>
           </div>
           <div className="stat">
             <span className="stat-label">Completion</span>
-            <span className="stat-value">{Math.round((totalPlayed / TOTAL_CARDS) * 100)}%</span>
+            <span className="stat-value">{Math.round((cut / TOTAL_TILES) * 100)}%</span>
           </div>
         </div>
-
         <button className="btn-primary btn-large" onClick={onRestart}>
           NEW MISSION
         </button>

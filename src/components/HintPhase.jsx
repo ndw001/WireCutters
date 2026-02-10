@@ -1,84 +1,72 @@
-import React, { useState } from 'react'
-import { CARD_MIN, CARD_MAX } from '../game/logic'
+import React from 'react'
 
 export default function HintPhase({ state, onAssign, onPass }) {
   const { players, hintPool, currentPlayerIndex, playerCount } = state
   const currentPlayer = players[currentPlayerIndex]
-  const [selected, setSelected] = useState(null)
-
-  const availableNumbers = []
-  for (let n = CARD_MIN; n <= CARD_MAX; n++) {
-    if (hintPool[n] > 0) availableNumbers.push(n)
-  }
-
-  function handleAssign() {
-    if (selected !== null) {
-      onAssign(selected)
-      setSelected(null)
-    }
-  }
+  const otherPlayers = players.filter(p => p.id !== currentPlayerIndex)
 
   return (
     <div className="screen">
       <header className="game-header">
         <div className="header-title">💣 BOMB BUSTERS</div>
-        <div className="header-phase">HINT PHASE</div>
+        <div className="header-phase">HINT PHASE — {currentPlayerIndex + 1} / {playerCount}</div>
       </header>
 
-      {/* All players' assigned hints */}
-      <div className="all-hints-row">
-        {players.map(p => (
-          <div key={p.id} className={`player-hint-badge ${p.id === currentPlayerIndex ? 'current' : ''}`}>
-            <span className="player-label">{p.name}</span>
-            <span className={`hint-chip ${p.hintToken !== null ? 'assigned' : 'empty'}`}>
-              {p.hintToken !== null ? p.hintToken : '?'}
-            </span>
-          </div>
-        ))}
-      </div>
+      {/* Other players' tiles — face-down, show any already-placed hints */}
+      {otherPlayers.length > 0 && (
+        <div className="other-players-strip">
+          {otherPlayers.map(p => (
+            <div key={p.id} className="strip-player">
+              <div className="strip-name">{p.name}</div>
+              <div className="strip-tiles">
+                {p.tiles.map((tile, i) => (
+                  <div key={i} className={`tile-back-sm ${tile.hintToken !== null ? 'tile-back-hinted' : ''}`}>
+                    {tile.hintToken !== null ? tile.hintToken : '?'}
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
 
       <div className="hint-card">
         <div className="turn-banner">
-          {currentPlayer.name}'s turn
-          <span className="turn-sub">({currentPlayerIndex + 1} of {playerCount})</span>
+          {currentPlayer.name}
+          <span className="turn-sub"> — choose a tile to hint</span>
         </div>
-
         <p className="hint-instruction">
-          Pick a number token that matches a card in your hand. Your token will be visible to all other agents.
+          Tap one of your tiles to place a public info token on it.
+          Other agents will see that token — it reveals that tile's number to the team.
+          Grayed tiles can't be hinted (token pool exhausted for that number).
         </p>
 
-        <div className="hint-grid">
-          {Array.from({ length: CARD_MAX }, (_, i) => i + 1).map(n => {
-            const available = hintPool[n] > 0
+        <div className="hint-tiles-row">
+          {currentPlayer.tiles.map((tile, i) => {
+            const poolEmpty = hintPool[tile.value] <= 0
+            const alreadyHinted = tile.hintToken !== null
+            const disabled = poolEmpty || alreadyHinted
             return (
               <button
-                key={n}
-                className={`hint-token ${selected === n ? 'selected' : ''} ${!available ? 'used' : ''}`}
-                onClick={() => available && setSelected(n === selected ? null : n)}
-                disabled={!available}
+                key={i}
+                className={`tile-own ${alreadyHinted ? 'tile-hinted' : ''} ${disabled && !alreadyHinted ? 'tile-disabled' : ''}`}
+                onClick={() => !disabled && onAssign(i)}
+                disabled={disabled}
+                title={poolEmpty ? `No more hints available for ${tile.value}` : ''}
               >
-                <span className="token-num">{n}</span>
-                {hintPool[n] < 2 && available && (
-                  <span className="token-remaining">1 left</span>
+                {tile.value}
+                {alreadyHinted && <span className="tile-star">★</span>}
+                {!alreadyHinted && !poolEmpty && (
+                  <span className="pool-left">×{hintPool[tile.value]}</span>
                 )}
-                {!available && <span className="token-remaining">gone</span>}
               </button>
             )
           })}
         </div>
 
-        <div className="hint-actions">
-          <button
-            className="btn-primary"
-            onClick={handleAssign}
-            disabled={selected === null}
-          >
-            ASSIGN TOKEN [{selected ?? '—'}]
-          </button>
-          <button className="btn-ghost" onClick={onPass}>
-            PASS (no hint)
-          </button>
-        </div>
+        <button className="btn-ghost" onClick={onPass}>
+          PASS — no hint this turn
+        </button>
       </div>
     </div>
   )

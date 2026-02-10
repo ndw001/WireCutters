@@ -1,19 +1,21 @@
-// Bomb Busters – Basic (no yellow, no red)
-// Deck: 4 copies of numbers 1-12 = 48 cards
+// Bomb Busters – Basic Edition (blue tiles only, no yellow, no red)
+// 4 copies of numbers 1-12 = 48 tiles total
+// Core mechanic: Dual Cut (pick your tile, tap another player's face-down tile)
+//   Match  → both tiles removed
+//   Miss   → their tile gets an info token revealing its number; bomb countdown advances
+// Solo Cut: if you hold ALL remaining copies of a number, cut them yourself
 
-export const TOTAL_CARDS = 48
+export const TOTAL_TILES = 48
 export const MAX_LIVES = 3
 export const CARD_MIN = 1
 export const CARD_MAX = 12
-export const COPIES_PER_NUMBER = 4
-export const HINT_COPIES = 2 // 2 of each hint token number
+export const COPIES = 4
+export const HINT_COPIES = 2 // 2 of each info token available in setup
 
 export function createDeck() {
   const deck = []
   for (let n = CARD_MIN; n <= CARD_MAX; n++) {
-    for (let c = 0; c < COPIES_PER_NUMBER; c++) {
-      deck.push(n)
-    }
+    for (let c = 0; c < COPIES; c++) deck.push(n)
   }
   return deck
 }
@@ -27,161 +29,255 @@ export function shuffle(array) {
   return arr
 }
 
-export function dealCards(playerCount) {
+export function dealTiles(playerCount) {
   const deck = shuffle(createDeck())
   const hands = Array.from({ length: playerCount }, () => [])
-  deck.forEach((card, i) => hands[i % playerCount].push(card))
-  return hands.map(hand => [...hand].sort((a, b) => a - b))
+  deck.forEach((val, i) => hands[i % playerCount].push(val))
+  // Sort ascending, wrap each card as { value, hintToken }
+  return hands.map(hand =>
+    [...hand].sort((a, b) => a - b).map(value => ({ value, hintToken: null }))
+  )
 }
 
 export function createHintPool() {
   const pool = {}
-  for (let n = CARD_MIN; n <= CARD_MAX; n++) {
-    pool[n] = HINT_COPIES
-  }
+  for (let n = CARD_MIN; n <= CARD_MAX; n++) pool[n] = HINT_COPIES
   return pool
 }
 
-export function createPlayedCount() {
-  const counts = {}
-  for (let n = CARD_MIN; n <= CARD_MAX; n++) {
-    counts[n] = 0
-  }
-  return counts
+export function totalTilesLeft(players) {
+  return players.reduce((sum, p) => sum + p.tiles.length, 0)
 }
 
-// Returns the next card number needed, or null if all played
-export function getNextNeeded(playedCount) {
-  for (let n = CARD_MIN; n <= CARD_MAX; n++) {
-    if (playedCount[n] < COPIES_PER_NUMBER) return n
-  }
-  return null
+// Returns the values the current player can Solo Cut
+// (they hold ALL remaining uncut copies of that number)
+export function getSoloCutOptions(players, currentPlayerIndex) {
+  const totalCounts = {}
+  const myCounts = {}
+  players.forEach((p, i) => {
+    p.tiles.forEach(t => {
+      totalCounts[t.value] = (totalCounts[t.value] || 0) + 1
+      if (i === currentPlayerIndex) myCounts[t.value] = (myCounts[t.value] || 0) + 1
+    })
+  })
+  return Object.keys(myCounts)
+    .map(Number)
+    .filter(v => myCounts[v] === totalCounts[v])
+    .sort((a, b) => a - b)
 }
 
-// Returns total cards played so far
-export function getTotalPlayed(playedCount) {
-  return Object.values(playedCount).reduce((sum, v) => sum + v, 0)
-}
-
-// Initial state factory
 export function createInitialState() {
   return {
-    phase: 'setup', // setup | hint | play | win | lose
+    phase: 'setup',       // setup | pass | hint | play | win | lose
     playerCount: 2,
     players: [],
     hintPool: {},
-    playedCount: {},
     lives: MAX_LIVES,
     currentPlayerIndex: 0,
-    handRevealed: false,
-    lastAction: null, // { result: 'success'|'fail', card: number }
+    selectedTile: null,   // index into current player's tiles array
+    lastAction: null,     // { type, myValue?, targetValue?, value?, count?, nextPlayerIndex }
+    passTo: null,         // player index shown on pass screen
+    passNextPhase: null,  // phase to resume after pass confirmed
   }
 }
 
-// Pure reducer
 export function gameReducer(state, action) {
   switch (action.type) {
+
     case 'START_GAME': {
       const { playerCount } = action
-      const hands = dealCards(playerCount)
+      const tileHands = dealTiles(playerCount)
       const players = Array.from({ length: playerCount }, (_, i) => ({
         id: i,
         name: `Player ${i + 1}`,
-        hand: hands[i],
-        hintToken: null,
+        tiles: tileHands[i],
       }))
       return {
-        phase: 'hint',
+        ...createInitialState(),
+        phase: 'pass',
         playerCount,
         players,
         hintPool: createHintPool(),
-        playedCount: createPlayedCount(),
         lives: MAX_LIVES,
         currentPlayerIndex: 0,
-        handRevealed: false,
-        lastAction: null,
+        passTo: 0,
+        passNextPhase: 'hint',
       }
     }
 
-    case 'ASSIGN_HINT': {
-      const { hintNumber } = action
-      if (state.hintPool[hintNumber] <= 0) return state // guard
-      const newPool = { ...state.hintPool, [hintNumber]: state.hintPool[hintNumber] - 1 }
-      const newPlayers = state.players.map((p, i) =>
-        i === state.currentPlayerIndex ? { ...p, hintToken: hintNumber } : p
-      )
-      const nextIndex = state.currentPlayerIndex + 1
-      if (nextIndex >= state.playerCount) {
-        return { ...state, hintPool: newPool, players: newPlayers, phase: 'play', currentPlayerIndex: 0 }
+    case 'CONFIRM_PASS': {
+      return {
+        ...state,
+        phase: state.passNextPhase,
+        passTo: null,
+        passNextPhase: null,
+        lastAction: null,
+        selectedTile: null,
       }
-      return { ...state, hintPool: newPool, players: newPlayers, currentPlayerIndex: nextIndex }
+    }
+
+    // Hint phase: player taps one of their own tiles to place an info token on it
+    case 'ASSIGN_HINT': {
+      const { tileIndex } = action
+      const currentPlayer = state.players[state.currentPlayerIndex]
+      const tile = currentPlayer.tiles[tileIndex]
+      if (tile.hintToken !== null) return state           // already hinted
+      if (state.hintPool[tile.value] <= 0) return state  // pool exhausted for this number
+
+      const newTiles = currentPlayer.tiles.map((t, i) =>
+        i === tileIndex ? { ...t, hintToken: t.value } : t
+      )
+      const newPlayers = state.players.map((p, i) =>
+        i === state.currentPlayerIndex ? { ...p, tiles: newTiles } : p
+      )
+      const newPool = { ...state.hintPool, [tile.value]: state.hintPool[tile.value] - 1 }
+      return advanceHintPhase({ ...state, players: newPlayers, hintPool: newPool })
     }
 
     case 'PASS_HINT': {
-      const nextIndex = state.currentPlayerIndex + 1
-      if (nextIndex >= state.playerCount) {
-        return { ...state, phase: 'play', currentPlayerIndex: 0 }
+      return advanceHintPhase(state)
+    }
+
+    // Play phase: tap your own tile to select it (tap again to deselect)
+    case 'SELECT_TILE': {
+      const { tileIndex } = action
+      return {
+        ...state,
+        selectedTile: state.selectedTile === tileIndex ? null : tileIndex,
       }
-      return { ...state, currentPlayerIndex: nextIndex }
     }
 
-    case 'REVEAL_HAND': {
-      return { ...state, handRevealed: true }
-    }
+    // Play phase: after selecting your tile, tap a face-down tile from another player
+    case 'MATCH_TILES': {
+      const { targetPlayerId, targetTileIndex } = action
+      if (state.selectedTile === null) return state
 
-    case 'PLAY_CARD': {
-      const { card } = action
-      const player = state.players[state.currentPlayerIndex]
-      const nextNeeded = getNextNeeded(state.playedCount)
-      const isCorrect = card === nextNeeded
+      const currentPlayer = state.players[state.currentPlayerIndex]
+      const targetPlayer = state.players[targetPlayerId]
+      const myTile = currentPlayer.tiles[state.selectedTile]
+      const targetTile = targetPlayer.tiles[targetTileIndex]
+      const isMatch = myTile.value === targetTile.value
 
-      // Remove exactly one copy of the card from the player's hand
-      const newHand = [...player.hand]
-      const idx = newHand.indexOf(card)
-      newHand.splice(idx, 1)
+      let newPlayers
+      let newLives = state.lives
 
-      const newPlayers = state.players.map((p, i) =>
-        i === state.currentPlayerIndex ? { ...p, hand: newHand } : p
-      )
+      if (isMatch) {
+        // Both tiles removed
+        const myIdx = state.selectedTile
+        const newMyTiles = currentPlayer.tiles.filter((_, i) => i !== myIdx)
+        const newTargetTiles = targetPlayer.tiles.filter((_, i) => i !== targetTileIndex)
+        newPlayers = state.players.map((p, i) => {
+          if (i === state.currentPlayerIndex) return { ...p, tiles: newMyTiles }
+          if (i === targetPlayerId)           return { ...p, tiles: newTargetTiles }
+          return p
+        })
+      } else {
+        // Info token placed on target tile; countdown advances (lose a life)
+        const newTargetTiles = targetPlayer.tiles.map((t, i) =>
+          i === targetTileIndex ? { ...t, hintToken: t.value } : t
+        )
+        newPlayers = state.players.map((p, i) =>
+          i === targetPlayerId ? { ...p, tiles: newTargetTiles } : p
+        )
+        newLives--
+      }
 
-      const newPlayedCount = isCorrect
-        ? { ...state.playedCount, [card]: state.playedCount[card] + 1 }
-        : state.playedCount
-
-      const newLives = isCorrect ? state.lives : state.lives - 1
-      const totalPlayed = getTotalPlayed(newPlayedCount)
+      const remaining = totalTilesLeft(newPlayers)
+      const nextPlayerIndex = (state.currentPlayerIndex + 1) % state.playerCount
 
       let newPhase = 'play'
-      if (totalPlayed === TOTAL_CARDS) newPhase = 'win'
+      if (remaining === 0) newPhase = 'win'
       else if (newLives === 0) newPhase = 'lose'
 
       return {
         ...state,
         players: newPlayers,
-        playedCount: newPlayedCount,
         lives: newLives,
         phase: newPhase,
-        handRevealed: false,
-        lastAction: { result: isCorrect ? 'success' : 'fail', card, needed: nextNeeded },
+        selectedTile: null,
+        lastAction: {
+          type: isMatch ? 'dual-match' : 'dual-miss',
+          myValue: myTile.value,
+          targetValue: targetTile.value,
+          targetPlayerName: targetPlayer.name,
+          nextPlayerIndex: newPhase === 'play' ? nextPlayerIndex : null,
+        },
       }
     }
 
+    // Play phase: cut all your remaining copies of a value (you hold every copy left)
+    case 'SOLO_CUT': {
+      const { value } = action
+      const soloCutOptions = getSoloCutOptions(state.players, state.currentPlayerIndex)
+      if (!soloCutOptions.includes(value)) return state
+
+      const currentPlayer = state.players[state.currentPlayerIndex]
+      const removedCount = currentPlayer.tiles.filter(t => t.value === value).length
+      const newTiles = currentPlayer.tiles.filter(t => t.value !== value)
+      const newPlayers = state.players.map((p, i) =>
+        i === state.currentPlayerIndex ? { ...p, tiles: newTiles } : p
+      )
+
+      const remaining = totalTilesLeft(newPlayers)
+      const nextPlayerIndex = (state.currentPlayerIndex + 1) % state.playerCount
+
+      const newPhase = remaining === 0 ? 'win' : 'play'
+
+      return {
+        ...state,
+        players: newPlayers,
+        phase: newPhase,
+        selectedTile: null,
+        lastAction: {
+          type: 'solo',
+          value,
+          count: removedCount,
+          nextPlayerIndex: newPhase === 'play' ? nextPlayerIndex : null,
+        },
+      }
+    }
+
+    // Dismiss result overlay → show pass screen for next player
     case 'NEXT_TURN': {
-      // Skip players with empty hands (shouldn't happen with equal dealing, but just in case)
-      let nextIndex = (state.currentPlayerIndex + 1) % state.playerCount
-      let checked = 0
-      while (state.players[nextIndex].hand.length === 0 && checked < state.playerCount) {
-        nextIndex = (nextIndex + 1) % state.playerCount
-        checked++
+      const nextPlayerIndex = state.lastAction?.nextPlayerIndex
+      if (nextPlayerIndex == null) return state
+      return {
+        ...state,
+        phase: 'pass',
+        currentPlayerIndex: nextPlayerIndex,
+        passTo: nextPlayerIndex,
+        passNextPhase: 'play',
+        lastAction: null,
+        selectedTile: null,
       }
-      return { ...state, currentPlayerIndex: nextIndex, lastAction: null, handRevealed: false }
     }
 
-    case 'RESTART': {
+    case 'RESTART':
       return createInitialState()
-    }
 
     default:
       return state
+  }
+}
+
+function advanceHintPhase(state) {
+  const nextIndex = state.currentPlayerIndex + 1
+  if (nextIndex >= state.playerCount) {
+    // All players hinted → start play phase from Player 1
+    return {
+      ...state,
+      phase: 'pass',
+      currentPlayerIndex: 0,
+      passTo: 0,
+      passNextPhase: 'play',
+    }
+  }
+  // Pass to next player's hint turn
+  return {
+    ...state,
+    phase: 'pass',
+    currentPlayerIndex: nextIndex,
+    passTo: nextIndex,
+    passNextPhase: 'hint',
   }
 }

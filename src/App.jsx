@@ -1,6 +1,7 @@
 import React, { useReducer } from 'react'
 import { gameReducer, createInitialState } from './game/logic'
 import Setup from './components/Setup'
+import PassScreen from './components/PassScreen'
 import HintPhase from './components/HintPhase'
 import PlayPhase from './components/PlayPhase'
 import GameOver from './components/GameOver'
@@ -8,44 +9,19 @@ import GameOver from './components/GameOver'
 export default function App() {
   const [state, dispatch] = useReducer(gameReducer, undefined, createInitialState)
 
-  function handleStart(playerCount) {
-    dispatch({ type: 'START_GAME', playerCount })
-  }
-
-  function handleAssignHint(hintNumber) {
-    dispatch({ type: 'ASSIGN_HINT', hintNumber })
-  }
-
-  function handlePassHint() {
-    dispatch({ type: 'PASS_HINT' })
-  }
-
-  function handleReveal() {
-    dispatch({ type: 'REVEAL_HAND' })
-  }
-
-  function handlePlayCard(card) {
-    dispatch({ type: 'PLAY_CARD', card })
-  }
-
-  function handleNextTurn() {
-    dispatch({ type: 'NEXT_TURN' })
-  }
-
-  function handleRestart() {
-    dispatch({ type: 'RESTART' })
-  }
-
   switch (state.phase) {
     case 'setup':
-      return <Setup onStart={handleStart} />
+      return <Setup onStart={(playerCount) => dispatch({ type: 'START_GAME', playerCount })} />
+
+    case 'pass':
+      return <PassScreen state={state} onConfirm={() => dispatch({ type: 'CONFIRM_PASS' })} />
 
     case 'hint':
       return (
         <HintPhase
           state={state}
-          onAssign={handleAssignHint}
-          onPass={handlePassHint}
+          onAssign={(tileIndex) => dispatch({ type: 'ASSIGN_HINT', tileIndex })}
+          onPass={() => dispatch({ type: 'PASS_HINT' })}
         />
       )
 
@@ -53,15 +29,18 @@ export default function App() {
       return (
         <PlayPhase
           state={state}
-          onReveal={handleReveal}
-          onPlayCard={handlePlayCard}
-          onNextTurn={handleNextTurn}
+          onSelectTile={(tileIndex) => dispatch({ type: 'SELECT_TILE', tileIndex })}
+          onMatchTile={(targetPlayerId, targetTileIndex) =>
+            dispatch({ type: 'MATCH_TILES', targetPlayerId, targetTileIndex })
+          }
+          onSoloCut={(value) => dispatch({ type: 'SOLO_CUT', value })}
+          onContinue={() => dispatch({ type: 'NEXT_TURN' })}
         />
       )
 
     case 'win':
     case 'lose':
-      return <GameOver state={state} onRestart={handleRestart} />
+      return <GameOver state={state} onRestart={() => dispatch({ type: 'RESTART' })} />
 
     default:
       return null
